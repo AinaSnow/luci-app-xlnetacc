@@ -132,6 +132,7 @@ jobs:
           fi
           ipk_path="${ipk_array[0]}"
           echo "Found IPK: $ipk_path"
+          TEST_IPK="$ipk_path" python3 -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p test_postinst.py -v
           echo "IPK_PATH=$ipk_path" >> $GITHUB_ENV
           echo "IPK_NAME=$(basename "$ipk_path")" >> $GITHUB_ENV
 

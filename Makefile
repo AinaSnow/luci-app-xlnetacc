@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-xlnetacc
 PKG_VERSION:=1.1.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_LICENSE:=GPLv2
 PKG_MAINTAINER:=Sense <sensec@gmail.com>
@@ -35,7 +35,9 @@ endef
 
 define Package/$(PKG_NAME)/postinst
 #!/bin/sh
-if [ -z "$${IPKG_INSTROOT}" ]; then
+# Modern OpenWrt consumes uci-defaults before running postinst-pkg.
+# Keep the fallback for older installers, but never source a consumed script.
+if [ -z "$${IPKG_INSTROOT}" ] && [ -f /etc/uci-defaults/luci-xlnetacc ]; then
 	( . /etc/uci-defaults/luci-xlnetacc ) && rm -f /etc/uci-defaults/luci-xlnetacc
 fi
 exit 0
