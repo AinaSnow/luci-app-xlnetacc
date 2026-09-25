@@ -1,6 +1,11 @@
-name: Manual IPK Build & Release
+name: Build IPK
 
 on:
+  pull_request:
+    paths:
+      - 'Makefile'
+      - 'files/**'
+      - '.github/workflows/manual-ipk-build.yml'
   workflow_dispatch:
     inputs:
       sdk_url:
@@ -42,6 +47,7 @@ jobs:
       - name: Download OpenWrt SDK
         run: |
           SDK_URL="${{ github.event.inputs.sdk_url }}"
+          [ -n "$SDK_URL" ] || SDK_URL='https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz'
           
           mkdir -p /tmp/sdk
           cd /tmp/sdk

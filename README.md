@@ -16,7 +16,7 @@
 ## 验证码识别配置（1.1.0）
 
 在 LuCI「迅雷快鸟」设置中填写识别服务地址、API Key 和实际支持图片输入的模型名称。
-例如局域网 CPA 的 Base URL 可填写 `https://api.example.com/v1`，插件会调用
+例如兼容服务的 Base URL 可填写 `https://api.example.com/v1`，插件会调用
 `/v1/chat/completions`；也接受完整的 `/chat/completions` 地址。模型名以服务端配置为准，
 不再在未填写时回退到内置的免费模型。升级会保留已有 UCI 配置。
 
@@ -62,5 +62,7 @@ node tests/test_ui.js
 
 测试使用本地模拟 HTTP 服务和 LuCI/jshn 测试替身，不请求真实 CPA 或迅雷。
 覆盖超过 5 秒的响应、超时与错误分类、请求 JSON、重试上限、旧验证码、CSRF 和页面交互。
-GitHub Actions 自动执行这些检查；现有手动构建工作流可生成 IPK。
+GitHub Actions 自动执行这些检查，并为涉及插件文件的 PR 编译 IPK。
+也可在 Actions 中手动运行「Build IPK」，从完成后的 Artifacts 下载 `luci-app-xlnetacc-ipk`。
+默认只上传构建产物；手动勾选 `publish_release` 才会发布 GitHub Release。
 在真实 OpenWrt 上还应验证依赖安装、LuCI 显示，以及服务端返回的验证码格式和有效期。
