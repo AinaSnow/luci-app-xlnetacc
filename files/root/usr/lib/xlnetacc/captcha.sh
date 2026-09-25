@@ -180,6 +180,8 @@ swjsq_get_verify_code() {
 	rm -rf "$tmp"
 	captcha_set_state ready
 	_log '已获取新的验证码'
+	# The logger's final status is not the download result.
+	return 0
 }
 
 # At most one transport retry, with the same image/key pair.

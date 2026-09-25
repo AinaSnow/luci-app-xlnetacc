@@ -22,7 +22,14 @@ const context = {
 };
 vm.runInNewContext(script, context);
 const update = context.window.xlnetaccCaptchaUpdate;
+for (const stage of ['ready', 'recognizing', 'submitting']) {
+    update({ captcha: { stage, generation: 'image.1' } });
+    assert.equal(elements['xlnetacc-captcha-preview'].style.display, '', stage + ' must show the image');
+    assert.equal(elements['xlnetacc-captcha-input'].style.display, 'none');
+    assert.equal(elements['xlnetacc-captcha-submit'].disabled, true);
+}
 update({ captcha: { stage: 'manual', generation: 'image.1' } });
+assert.equal(elements['xlnetacc-captcha-preview'].style.display, '');
 assert.equal(elements['xlnetacc-captcha-input'].style.display, '');
 elements['xlnetacc-captcha-code'].value = 'aB12';
 elements['xlnetacc-captcha-submit'].onclick();
@@ -36,6 +43,8 @@ update({ captcha: { stage: 'recognizing', generation: 'image.2' } });
 assert.equal(elements['xlnetacc-captcha-input'].style.display, 'none');
 assert.equal(elements['xlnetacc-captcha-submit'].disabled, true);
 update({ captcha: { stage: 'expired', generation: '' } });
+assert.equal(elements['xlnetacc-captcha-preview'].style.display, 'none');
+assert.equal(elements['xlnetacc-captcha-image'].src, undefined);
 assert.equal(elements['xlnetacc-captcha-refresh'].style.display, '');
 update({ captcha: { stage: 'idle', generation: '' }, api_test: 'success\npassed\n1\n' });
 elements['xlnetacc-api-test'].onclick();

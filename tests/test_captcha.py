@@ -78,13 +78,17 @@ class CaptchaTests(unittest.TestCase):
         prefix = '''. "$LIB"
 captcha_dir="$TEST_TMP/runtime"
 captcha_prepare || exit 99
-_log() { printf '%s\\n' "$*" >> "$TEST_TMP/log"; }
+logging=1; verbose=0; down_acc=1; up_acc=0
+LOGFILE="$TEST_TMP/log"
 chatgpt_api_key=secret-test-key
 chatgpt_model='vision"model'
 ai_timeout=15
 ai_max_tokens=1024
 captcha_length=4
 '''
+        source = (ROOT/'files/root/usr/bin/xlnetacc.sh').read_text(encoding='utf-8')
+        # Use the production logger: its last conditional can return nonzero.
+        prefix += source[source.index('_log() {'):source.index('# 清理日志')]
         prefix += f"chatgpt_base_url=http://127.0.0.1:{self.server.server_port}/v1\n"
         result = subprocess.run([BASH, '-c', prefix + (JSON_SHIM if shim else '') + code],
                                 env=env, capture_output=True, text=True, encoding='utf-8', timeout=45)
@@ -291,5 +295,42 @@ _http_cmd=fake_wget
 if swjsq_get_verify_code MEA; then exit 1; fi
 [ ! -f "$captcha_dir/image" ] && [ ! -f "$captcha_dir/key" ]
 ''')
+
+    def login_after_download(self, manual=False):
+        self.run_shell(('chatgpt_api_key=\n' if manual else '') + r'''
+fake_wget() {
+    local target
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = -O ]; then shift; target=$1; fi
+        shift
+    done
+    cp "$TEST_IMAGE" "$target"
+    printf 'Set-Cookie: VERIFY_KEY=test-key; Path=/\n' >&2
+}
+_http_cmd=fake_wget
+calls=0
+swjsq_login_once() {
+    calls=$((calls+1))
+    if [ "$calls" -eq 1 ]; then lasterr=6; return 1; fi
+    [ "$(head -n 1 "$captcha_dir/state")" = submitting ] || exit 11
+    [ "$captcha_code" = aB12 ] && [ "$captcha_key" = test-key ] || exit 12
+    return 0
+}
+# Supply a browser submission only after the real manual wait starts.
+sleep() {
+    [ "$(head -n 1 "$captcha_dir/state")" = manual ] || exit 13
+    printf '%s\nsubmit\naB12\n' "$captcha_generation" > "$captcha_dir/request"
+}
+swjsq_login || exit 14
+[ "$calls" -eq 2 ] && [ "$(head -n 1 "$captcha_dir/state")" = idle ]
+''', shim=True)
+
+    def test_download_continues_to_recognition_and_login_with_real_logger(self):
+        self.login_after_download()
+        self.assertEqual(len(self.server.received), 1)
+
+    def test_download_continues_to_manual_and_login_with_real_logger(self):
+        self.login_after_download(manual=True)
+        self.assertEqual(self.server.received, [])
 
 if __name__ == '__main__': unittest.main()

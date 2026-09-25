@@ -1,8 +1,10 @@
 <fieldset class="cbi-section">
 	<legend><%:Captcha verification%></legend>
 	<p id="xlnetacc-captcha-status" aria-live="polite"></p>
-	<div id="xlnetacc-captcha-input" style="display:none">
+	<div id="xlnetacc-captcha-preview" style="display:none">
 		<p><img id="xlnetacc-captcha-image" alt="<%:Captcha image%>" style="max-width:100%;background:white" /></p>
+	</div>
+	<div id="xlnetacc-captcha-input" style="display:none">
 		<label for="xlnetacc-captcha-code"><%:Captcha code%></label>
 		<input id="xlnetacc-captcha-code" type="text" maxlength="8" autocomplete="off" autocapitalize="off" spellcheck="false" />
 		<button id="xlnetacc-captcha-submit" type="button" class="cbi-button cbi-button-apply"><%:Submit captcha%></button>
@@ -28,6 +30,7 @@
 	};
 	function render() {
 		byId('captcha-status').textContent = labels[stage] || '';
+		byId('captcha-preview').style.display = generation && /^(ready|recognizing|manual|submitting)$/.test(stage) ? '' : 'none';
 		byId('captcha-input').style.display = stage === 'manual' ? '' : 'none';
 		byId('captcha-refresh').style.display = /^(manual|expired|download_error)$/.test(stage) ? '' : 'none';
 		byId('captcha-submit').disabled = busy || stage !== 'manual';
