@@ -64,7 +64,9 @@ ai_request() {
 	command -v curl >/dev/null || { ai_diagnostic='缺少 curl，请重新安装插件依赖'; return 2; }
 	tmp=$(mktemp -d "$captcha_dir/ai.XXXXXX") || return 2
 	local encoded
-	encoded=$(base64 "$image" | tr -d '\r\n')
+	encoded=$(openssl base64 -A -in "$image" 2>/dev/null) || {
+		rm -rf "$tmp"; ai_diagnostic='无法编码图片，请检查 openssl-util'; return 2
+	}
 	json_init
 	json_add_string model "$chatgpt_model"
 	json_add_boolean stream 0
@@ -145,16 +147,30 @@ swjsq_get_verify_code() {
 	fi
 	key=$(sed -n 's/.*VERIFY_KEY=\([^;[:space:]]*\).*/\1/p' "$tmp/headers" | tail -n 1)
 	case "$key" in ''|*[!a-zA-Z0-9_-]*) key=;; esac
-	mime=$(od -An -tx1 -N8 "$tmp/image" | tr -d ' \n')
+	if [ -z "$key" ]; then
+		rm -rf "$tmp"; captcha_set_state download_error
+		_log '验证码响应未返回有效 KEY'; return 1
+	fi
+	if [ ! -s "$tmp/image" ] || [ "$(wc -c < "$tmp/image")" -gt 1048576 ]; then
+		rm -rf "$tmp"; captcha_set_state download_error
+		_log '验证码图片为空或超过大小限制'; return 1
+	fi
+	# Use the declared openssl-util dependency: minimal OpenWrt builds may omit
+	# od and base64. The upstream JPEG is labelled text/plain, so do not use
+	# Content-Type to decide whether the downloaded bytes are an image.
+	if ! mime=$(openssl base64 -A -in "$tmp/image" 2>/dev/null); then
+		rm -rf "$tmp"; captcha_set_state download_error
+		_log '无法读取验证码图片，请检查 openssl-util'; return 1
+	fi
 	case "$mime" in
-		ffd8ff*) mime=image/jpeg;;
-		89504e470d0a1a0a) mime=image/png;;
-		474946383761*|474946383961*) mime=image/gif;;
+		/9j/*) mime=image/jpeg;;
+		iVBORw0KGgo*) mime=image/png;;
+		R0lGODdh*|R0lGODlh*) mime=image/gif;;
 		*) mime=;;
 	esac
-	if [ -z "$key" ] || [ -z "$mime" ] || [ "$(wc -c < "$tmp/image")" -gt 1048576 ]; then
+	if [ -z "$mime" ]; then
 		rm -rf "$tmp"; captcha_set_state download_error
-		_log '验证码响应缺少有效图片或 KEY'; return 1
+		_log '验证码图片格式无法识别，期望 JPEG、PNG 或 GIF'; return 1
 	fi
 	printf '%s' "$key" > "$tmp/key"
 	mv -f "$tmp/image" "$captcha_dir/image"

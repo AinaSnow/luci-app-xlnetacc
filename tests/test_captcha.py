@@ -239,4 +239,57 @@ if swjsq_login_once; then exit 1; fi
 [ "$lasterr" -eq -3 ]
 ''')
 
+    def test_download_jpeg_without_od_or_hexdump(self):
+        self.run_shell(r'''
+od() { return 127; }
+hexdump() { return 127; }
+base64() { return 127; }
+fake_wget() {
+    local target
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = -O ]; then shift; target=$1; fi
+        shift
+    done
+    printf '\377\330\377\333\000\204\000\001' > "$target"
+    printf 'HTTP/1.1 200 OK\nContent-Type: text/plain; charset=utf-8\nSet-Cookie: VERIFY_KEY=test-key; Path=/\n' >&2
+}
+_http_cmd=fake_wget
+swjsq_get_verify_code MEA || exit 1
+[ "$(cat "$captcha_dir/mime")" = image/jpeg ] && [ "$(cat "$captcha_dir/key")" = test-key ]
+''')
+
+    def test_download_png_ignores_incorrect_content_type(self):
+        self.run_shell(r'''
+od() { return 127; }
+base64() { return 127; }
+fake_wget() {
+    local target
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = -O ]; then shift; target=$1; fi
+        shift
+    done
+    cp "$TEST_IMAGE" "$target"
+    printf 'Content-Type: text/plain\nSet-Cookie: VERIFY_KEY=test-key; Path=/\n' >&2
+}
+_http_cmd=fake_wget
+swjsq_get_verify_code MEA || exit 1
+[ "$(cat "$captcha_dir/mime")" = image/png ]
+''')
+
+    def test_html_response_with_cookie_is_not_an_image(self):
+        self.run_shell(r'''
+fake_wget() {
+    local target
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = -O ]; then shift; target=$1; fi
+        shift
+    done
+    printf '<html>error</html>' > "$target"
+    printf 'Set-Cookie: VERIFY_KEY=test-key; Path=/\n' >&2
+}
+_http_cmd=fake_wget
+if swjsq_get_verify_code MEA; then exit 1; fi
+[ ! -f "$captcha_dir/image" ] && [ ! -f "$captcha_dir/key" ]
+''')
+
 if __name__ == '__main__': unittest.main()
