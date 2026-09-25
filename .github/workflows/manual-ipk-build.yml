@@ -1,6 +1,11 @@
-name: Manual IPK Build & Release
+name: Build IPK
 
 on:
+  pull_request:
+    paths:
+      - 'Makefile'
+      - 'files/**'
+      - '.github/workflows/manual-ipk-build.yml'
   workflow_dispatch:
     inputs:
       sdk_url:
@@ -17,6 +22,10 @@ on:
       release_name:
         description: Release title (auto-generated if empty)
         required: false
+      publish_release:
+        description: Also publish the IPK as a GitHub Release
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -38,6 +47,7 @@ jobs:
       - name: Download OpenWrt SDK
         run: |
           SDK_URL="${{ github.event.inputs.sdk_url }}"
+          [ -n "$SDK_URL" ] || SDK_URL='https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz'
           
           mkdir -p /tmp/sdk
           cd /tmp/sdk
@@ -122,6 +132,7 @@ jobs:
           fi
           ipk_path="${ipk_array[0]}"
           echo "Found IPK: $ipk_path"
+          TEST_IPK="$ipk_path" python3 -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p test_postinst.py -v
           echo "IPK_PATH=$ipk_path" >> $GITHUB_ENV
           echo "IPK_NAME=$(basename "$ipk_path")" >> $GITHUB_ENV
 
@@ -132,6 +143,7 @@ jobs:
           path: ${{ env.IPK_PATH }}
 
       - name: Set release variables
+        if: ${{ inputs.publish_release }}
         run: |
           rel_tag="${{ github.event.inputs.release_tag }}"
           rel_name="${{ github.event.inputs.release_name }}"
@@ -141,6 +153,7 @@ jobs:
           echo "REL_NAME=$rel_name" >> $GITHUB_ENV
 
       - name: Publish release asset
+        if: ${{ inputs.publish_release }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

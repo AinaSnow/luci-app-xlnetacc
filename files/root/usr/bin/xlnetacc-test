@@ -1,0 +1,25 @@
+#!/bin/sh
+. /usr/share/libubox/jshn.sh
+. /usr/lib/xlnetacc/captcha.sh
+
+captcha_prepare || exit 1
+mkdir "$captcha_dir/test.lock" 2>/dev/null || exit 1
+test_status() {
+	printf '%s\n%s\n%s\n' "$1" "$2" "$(date +%s)" > "$captcha_dir/test.status.tmp"
+	mv -f "$captcha_dir/test.status.tmp" "$captcha_dir/test.status"
+}
+cleanup() {
+	rmdir "$captcha_dir/test.lock" 2>/dev/null
+}
+trap cleanup EXIT
+trap 'test_status error "测试已中止"; exit 1' INT TERM
+test_status running '正在测试已保存的配置和图片输入能力'
+ai_load_config
+if ai_request /usr/share/xlnetacc/test.png 'Read the printed text in this image. Return only that text.' image/png; then
+	case "$ai_content" in
+		TEST|test) test_status success "图片识别测试通过：$ai_diagnostic";;
+		*) test_status error "接口已响应，但未正确识别测试图片：$ai_diagnostic";;
+	esac
+else
+	test_status error "$ai_diagnostic"
+fi

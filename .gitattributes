@@ -1,2 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+*.sh text eol=lf
+files/root/etc/init.d/* text eol=lf
+files/root/usr/bin/* text eol=lf
+*.lua text eol=lf
+*.htm text eol=lf
+*.po text eol=lf
+*.py text eol=lf
+*.png binary

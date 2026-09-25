@@ -1,8 +1,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-xlnetacc
-PKG_VERSION:=1.0.5
-PKG_RELEASE:=1
+PKG_VERSION:=1.1.0
+PKG_RELEASE:=2
 
 PKG_LICENSE:=GPLv2
 PKG_MAINTAINER:=Sense <sensec@gmail.com>
@@ -15,7 +15,7 @@ define Package/$(PKG_NAME)
 	SUBMENU:=3. Applications
 	TITLE:=LuCI Support for XLNetAcc
 	PKGARCH:=all
-	DEPENDS:=+jshn +wget +openssl-util
+	DEPENDS:=+jshn +wget +openssl-util +curl +ca-bundle
 endef
 
 define Package/$(PKG_NAME)/description
@@ -35,7 +35,9 @@ endef
 
 define Package/$(PKG_NAME)/postinst
 #!/bin/sh
-if [ -z "$${IPKG_INSTROOT}" ]; then
+# Modern OpenWrt consumes uci-defaults before running postinst-pkg.
+# Keep the fallback for older installers, but never source a consumed script.
+if [ -z "$${IPKG_INSTROOT}" ] && [ -f /etc/uci-defaults/luci-xlnetacc ]; then
 	( . /etc/uci-defaults/luci-xlnetacc ) && rm -f /etc/uci-defaults/luci-xlnetacc
 fi
 exit 0
@@ -64,6 +66,11 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_BIN) ./files/root/etc/uci-defaults/luci-xlnetacc $(1)/etc/uci-defaults/luci-xlnetacc
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) ./files/root/usr/bin/xlnetacc.sh $(1)/usr/bin/xlnetacc.sh
+	$(INSTALL_BIN) ./files/root/usr/bin/xlnetacc-test $(1)/usr/bin/xlnetacc-test
+	$(INSTALL_DIR) $(1)/usr/lib/xlnetacc
+	$(INSTALL_DATA) ./files/root/usr/lib/xlnetacc/captcha.sh $(1)/usr/lib/xlnetacc/captcha.sh
+	$(INSTALL_DIR) $(1)/usr/share/xlnetacc
+	$(INSTALL_DATA) ./files/root/usr/share/xlnetacc/test.png $(1)/usr/share/xlnetacc/test.png
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))
