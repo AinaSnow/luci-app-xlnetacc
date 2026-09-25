@@ -35,8 +35,15 @@
 	}
 	function post(url, data, done) {
 		data.token = '<%=luci.dispatcher.context.authtoken%>';
-		new XHR().post(url, data, function(xhr, result) {
+		var finished = false;
+		function finish(result) {
+			if (finished) return;
+			finished = true; clearTimeout(timer);
 			done(result || { ok: false, message: '<%:Request failed. Refresh the page and try again.%>' });
+		}
+		var timer = setTimeout(function() { finish(null); }, 15000);
+		new XHR().post(url, data, function(xhr, result) {
+			finish(result);
 		}, 15);
 	}
 	function send(action) {
@@ -74,8 +81,9 @@
 		stage = state.stage || 'idle'; render();
 		var test = status.api_test || '', parts = test.split('\n');
 		if (!testPending || test !== lastTest) {
-			byId('api-result').textContent = parts[1] || '';
-			testPending = parts[0] === 'running';
+			var stale = parts[0] === 'running' && Number(parts[2]) > 0 && Date.now() / 1000 - Number(parts[2]) > 210;
+			byId('api-result').textContent = stale ? '<%:Test timed out. Please try again.%>' : (parts[1] || '');
+			testPending = parts[0] === 'running' && !stale;
 			byId('api-test').disabled = testPending;
 			lastTest = test;
 		}

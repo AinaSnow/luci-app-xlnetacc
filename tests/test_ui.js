@@ -15,7 +15,7 @@ const context = {
             removeAttribute(name) { delete this[name]; }
         });
     } },
-    window: {}, Date, encodeURIComponent,
+    window: {}, Date, encodeURIComponent, setTimeout, clearTimeout,
     XHR: function() { this.post = (url, data, cb) => {
         requests.push({ url, data }); cb({ status: 200 }, { ok: true, message: 'queued' });
     }; }
@@ -42,8 +42,10 @@ elements['xlnetacc-api-test'].onclick();
 assert.equal(elements['xlnetacc-api-test'].disabled, true);
 update({ captcha: {}, api_test: 'success\npassed\n1\n' });
 assert.equal(elements['xlnetacc-api-test'].disabled, true, 'old result must not finish new test');
-update({ captcha: {}, api_test: 'running\ntesting\n2\n' });
+update({ captcha: {}, api_test: 'running\ntesting\n' + Math.floor(Date.now() / 1000) + '\n' });
 update({ captcha: {}, api_test: 'success\npassed\n3\n' });
 assert.equal(elements['xlnetacc-api-test'].disabled, false);
 assert.equal(elements['xlnetacc-api-result'].textContent, 'passed');
+update({ captcha: {}, api_test: 'running\ntesting\n1\n' });
+assert.equal(elements['xlnetacc-api-test'].disabled, false, 'stale test must be retryable after a page reload');
 console.log('LuCI UI state and submission checks passed');
