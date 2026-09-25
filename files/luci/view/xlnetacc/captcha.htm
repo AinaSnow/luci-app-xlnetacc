@@ -1,0 +1,88 @@
+<fieldset class="cbi-section">
+	<legend><%:Captcha verification%></legend>
+	<p id="xlnetacc-captcha-status" aria-live="polite"></p>
+	<div id="xlnetacc-captcha-input" style="display:none">
+		<p><img id="xlnetacc-captcha-image" alt="<%:Captcha image%>" style="max-width:100%;background:white" /></p>
+		<label for="xlnetacc-captcha-code"><%:Captcha code%></label>
+		<input id="xlnetacc-captcha-code" type="text" maxlength="8" autocomplete="off" autocapitalize="off" spellcheck="false" />
+		<button id="xlnetacc-captcha-submit" type="button" class="cbi-button cbi-button-apply"><%:Submit captcha%></button>
+	</div>
+	<p><button id="xlnetacc-captcha-refresh" type="button" class="cbi-button" style="display:none"><%:Get a new captcha%></button></p>
+	<p id="xlnetacc-captcha-feedback" aria-live="polite"></p>
+	<hr />
+	<p><%:Save and apply your API settings before testing. The test uses a normal text image and does not log in to Xunlei.%></p>
+	<button id="xlnetacc-api-test" type="button" class="cbi-button"><%:Test recognition service%></button>
+	<p id="xlnetacc-api-result" aria-live="polite"></p>
+</fieldset>
+
+<script type="text/javascript">//<![CDATA[
+(function() {
+	var generation = '', stage = '', busy = false, testPending = false, lastTest = '', testStarted = 0;
+	var byId = function(id) { return document.getElementById('xlnetacc-' + id); };
+	var labels = {
+		idle: '<%:No captcha required%>', stopped: '<%:Start XLNetAcc to use captcha verification%>',
+		downloading: '<%:Downloading captcha...%>', ready: '<%:Captcha ready%>',
+		recognizing: '<%:Recognizing captcha...%>', submitting: '<%:Verifying captcha...%>',
+		manual: '<%:Enter the captcha within 180 seconds%>', expired: '<%:Captcha input timed out. Get a new captcha to continue.%>',
+		download_error: '<%:Captcha download failed. Try again.%>', login_error: '<%:Login failed. Check the log.%>'
+	};
+	function render() {
+		byId('captcha-status').textContent = labels[stage] || '';
+		byId('captcha-input').style.display = stage === 'manual' ? '' : 'none';
+		byId('captcha-refresh').style.display = /^(manual|expired|download_error)$/.test(stage) ? '' : 'none';
+		byId('captcha-submit').disabled = busy || stage !== 'manual';
+		byId('captcha-refresh').disabled = busy;
+	}
+	function post(url, data, done) {
+		data.token = '<%=luci.dispatcher.context.authtoken%>';
+		new XHR().post(url, data, function(xhr, result) {
+			done(result || { ok: false, message: '<%:Request failed. Refresh the page and try again.%>' });
+		}, 15);
+	}
+	function send(action) {
+		if (busy) return;
+		busy = true; render();
+		post('<%=luci.dispatcher.build_url("admin", "services", "xlnetacc", "captcha")%>', {
+			action: action, generation: generation, code: action === 'submit' ? byId('captcha-code').value.trim() : ''
+		}, function(result) {
+			busy = false; byId('captcha-feedback').textContent = result.message; render();
+		});
+	}
+	byId('captcha-submit').onclick = function() { send('submit'); };
+	byId('captcha-refresh').onclick = function() { send('refresh'); };
+	byId('captcha-code').onkeydown = function(event) {
+		if (event.keyCode === 13) { event.preventDefault(); send('submit'); }
+	};
+	byId('api-test').onclick = function() {
+		byId('api-test').disabled = true;
+		testPending = true; testStarted = Date.now();
+		post('<%=luci.dispatcher.build_url("admin", "services", "xlnetacc", "test_api")%>', {}, function(result) {
+			byId('api-result').textContent = result.message;
+			if (!result.ok) { testPending = false; byId('api-test').disabled = false; }
+		});
+	};
+	window.xlnetaccCaptchaUpdate = function(status) {
+		var state = status.captcha || {};
+		if (state.generation !== generation) {
+			generation = state.generation || '';
+			byId('captcha-code').value = '';
+			byId('captcha-feedback').textContent = '';
+			if (generation) {
+				byId('captcha-image').src = '<%=luci.dispatcher.build_url("admin", "services", "xlnetacc", "captcha_image")%>?generation=' + encodeURIComponent(generation);
+			} else { byId('captcha-image').removeAttribute('src'); }
+		}
+		stage = state.stage || 'idle'; render();
+		var test = status.api_test || '', parts = test.split('\n');
+		if (!testPending || test !== lastTest) {
+			byId('api-result').textContent = parts[1] || '';
+			testPending = parts[0] === 'running';
+			byId('api-test').disabled = testPending;
+			lastTest = test;
+		}
+		if (testPending && testStarted && Date.now() - testStarted > 210000) {
+			testPending = false; byId('api-test').disabled = false;
+			byId('api-result').textContent = '<%:Test timed out. Please try again.%>';
+		}
+	};
+})();
+//]]></script>

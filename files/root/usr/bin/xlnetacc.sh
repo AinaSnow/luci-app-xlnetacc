@@ -31,13 +31,13 @@ lasterr=
 chatgpt_base_url=
 chatgpt_api_key=
 chatgpt_model=
-captcha_auto_retry=0
 sequence_xl=1000000
 sequence_down=$(( $(date +%s) / 6 ))
 sequence_up=$sequence_down
 
 # 包含用于解析 JSON 格式返回值的函数
 . /usr/share/libubox/jshn.sh
+. /usr/lib/xlnetacc/captcha.sh
 
 # 读取 UCI 设置相关函数
 uci_get_by_name() {
@@ -177,109 +177,8 @@ swjsq_json() {
 	json_add_string OSVersion "16"
 }
 
-# 获取图形验证码
-swjsq_get_verify_code() {
-	local verify_type=$1
-	local url="http://verify2.xunlei.com/image?t=${verify_type}"
-	local image_file="/tmp/xlnetacc_verify.jpg"
-	local key_file="/tmp/xlnetacc_verify_key"
-	local header_file="/tmp/xlnetacc_headers"
-
-	$_http_cmd -S -O "$image_file" "$url" >/dev/null 2> "$header_file"
-	local key=$(grep "Set-Cookie:" "$header_file" | grep "VERIFY_KEY" | sed 's/.*VERIFY_KEY=\([^;]*\).*/\1/')
-
-	if [ -n "$key" ]; then
-		echo -n "$key" > "$key_file"
-		cp "$image_file" "/www/luci-static/resources/xlnetacc_verify.jpg" 2>/dev/null
-		_log "已下载验证码至 /www/luci-static/resources/xlnetacc_verify.jpg，KEY: $key"
-	else
-		_log "下载验证码失败"
-	fi
-	rm -f "$header_file"
-}
-
-# 使用 AI 识别验证码
-swjsq_ai_recognize() {
-	local image_file=$1
-	[ -s "$image_file" ] || return 1
-	[ -z "$chatgpt_api_key" ] && return 2
-
-	local endpoint="${chatgpt_base_url:-https://openrouter.ai/api/v1}"
-	case "$endpoint" in
-		*/chat/completions) ;;
-		*/) endpoint="${endpoint}chat/completions";;
-		*) endpoint="${endpoint%/}/chat/completions";;
-	esac
-	local model="${chatgpt_model:-google/gemini-2.0-flash-exp:free}"
-	local img_base64=$(base64 "$image_file" | tr -d '\n')
-	[ -z "$img_base64" ] && return 1
-
-	local payload="/tmp/xlnetacc_chat_payload.json"
-	cat > "$payload" <<-EOF
-	{
-	  "model": "$model",
-	  "messages": [
-	    {
-	      "role": "user",
-	      "content": [
-	        { "type": "text", "text": "识别图片中的验证码，仅返回验证码字符，勿添加其他内容。" },
-	        { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,$img_base64" } }
-	      ]
-	    }
-	  ],
-	  "max_tokens": 30,
-	  "temperature": 0
-	}
-	EOF
-
-	local response
-	response=$($_http_cmd --header="Content-Type: application/json" --header="Authorization: Bearer $chatgpt_api_key" --post-file="$payload" "$endpoint")
-	local ret=$?
-	rm -f "$payload"
-	[ $ret -ne 0 ] && { _log "验证码识别请求失败" $(( 1 | 4 )); return 1; }
-
-	local content
-	json_cleanup; json_load "$response" >/dev/null 2>&1
-	json_select "choices" >/dev/null 2>&1 || return 1
-	json_select 1 >/dev/null 2>&1 || return 1
-	json_select "message" >/dev/null 2>&1 || return 1
-	json_get_var content "content"
-	json_select ".." >/dev/null 2>&1
-	json_select ".." >/dev/null 2>&1
-	json_select ".." >/dev/null 2>&1
-	[ -z "$content" ] && return 1
-	content=$(echo "$content" | tr -d '\r' | head -n 1)
-	content=$(echo "$content" | tr -d ' \t\r\n')
-	echo -n "$content"
-	return 0
-}
-
-# 自动识别验证码并重试登录
-swjsq_auto_verify() {
-	local verify_type=$1
-	local code_file="/tmp/xlnetacc_verify_code"
-	local image_file="/tmp/xlnetacc_verify.jpg"
-	local max_retry=5
-
-	[ -n "$chatgpt_api_key" ] || return 1
-	while [ $captcha_auto_retry -lt $max_retry ]; do
-		local code=$(swjsq_ai_recognize "$image_file")
-		captcha_auto_retry=$(( $captcha_auto_retry + 1 ))
-		if [ -n "$code" ]; then
-			echo -n "$code" > "$code_file"
-			_log "自动识别验证码: $code (第${captcha_auto_retry}次尝试)"
-			swjsq_login
-			return $?
-		fi
-		_log "自动识别验证码失败 (第${captcha_auto_retry}次)，重新获取验证码"
-		swjsq_get_verify_code "${verify_type:-MEA}"
-	done
-	_log "自动识别验证码失败次数达到上限，切换为手动输入模式"
-	return 1
-}
-
 # 帐号登录
-swjsq_login() {
+swjsq_login_once() {
 	swjsq_json
 	local cookie_args=""
 	if [ -z "$_userid" -o -z "$_loginkey" ]; then
@@ -287,19 +186,10 @@ swjsq_login() {
 		json_add_string userName "$username"
 		json_add_string passWord "$password"
 		
-		local vcode_file="/tmp/xlnetacc_verify_code"
-		local vcode=""
-		if [ -s "$vcode_file" ]; then
-			vcode=$(cat "$vcode_file")
-		else
-			vcode=$(uci_get_by_name "general" "verify_code")
-		fi
-
-		local vkey=$(cat /tmp/xlnetacc_verify_key 2>/dev/null)
-		if [ -n "$vcode" ] && [ -n "$vkey" ]; then
-			json_add_string verifyKey "$vkey"
-			json_add_string verifyCode "$vcode"
-			cookie_args="--header=Cookie:VERIFY_KEY=$vkey"
+		if [ -n "$captcha_code" ] && [ -n "$captcha_key" ]; then
+			json_add_string verifyKey "$captcha_key"
+			json_add_string verifyCode "$captcha_code"
+			cookie_args="--header=Cookie:VERIFY_KEY=$captcha_key"
 		else
 			json_add_string verifyKey
 			json_add_string verifyCode
@@ -312,12 +202,13 @@ swjsq_login() {
 	fi
 	json_close_object
 
-	local ret=$($_http_cmd $cookie_args --user-agent="$agent_xl" "$access_url" --post-data="$(json_dump)")
+	local ret
+	lasterr=-1
+	ret=$($_http_cmd $cookie_args --user-agent="$agent_xl" "$access_url" --post-data="$(json_dump)")
 	case $? in
 		0)
-			_log "login is $ret" $(( 1 | 4 ))
-			json_cleanup; json_load "$ret" >/dev/null 2>&1
-			json_get_var lasterr "errorCode"
+			json_cleanup
+			if json_load "$ret" >/dev/null 2>&1; then json_get_var lasterr "errorCode"; fi
 			;;
 		2) lasterr=-2;;
 		4) lasterr=-3;;
@@ -329,43 +220,13 @@ swjsq_login() {
 			json_get_var _userid "userID"
 			json_get_var _loginkey "loginKey"
 			json_get_var _sessionid "sessionID"
-			_log "_sessionid is $_sessionid" $(( 1 | 4 ))
 			local outmsg="帐号登录成功"; _log "$outmsg" $(( 1 | 8 ))
-			captcha_auto_retry=0
-			rm -f /tmp/xlnetacc_verify.jpg /tmp/xlnetacc_verify_key /tmp/xlnetacc_verify_code 2>/dev/null
+			captcha_clear
 			;;
 		6)
-			local verify_type
-			json_get_var verify_type "verifyType"
-			local outmsg="帐号登录失败。需要输入图形验证码"; _log "$outmsg" $(( 1 | 8 | 32 ))
-			swjsq_get_verify_code "${verify_type:-MEA}"
-			
-			local wait_time=180
-			local code_file="/tmp/xlnetacc_verify_code"
-			rm -f "$code_file"
-			if [ -z "$chatgpt_api_key" ]; then
-				_log "未配置验证码识别 API Key，使用手动输入模式"
-			else
-				swjsq_auto_verify "${verify_type:-MEA}"
-				[ $? -eq 0 ] && return 0
-			fi
-
-			_log "请查看 /www/luci-static/resources/xlnetacc_verify.jpg 获取验证码"
-			_log "或打开浏览器访问 http://<路由器IP地址>/luci-static/resources/xlnetacc_verify.jpg"
-			_log "请在 ${wait_time} 秒内将验证码写入 $code_file"
-			_log "命令示例: echo 'abcd' > $code_file"
-			
-			local i=0
-			while [ $i -lt $wait_time ]; do
-				if [ -s "$code_file" ]; then
-					_log "检测到验证码，重试登录..."
-					swjsq_login
-					return $?
-				fi
-				sleep 1
-				let i++
-			done
-			_log "等待验证码超时"
+			json_get_var captcha_verify_type "verifyType"
+			_userid=; _loginkey=
+			_log "帐号登录失败。需要输入图形验证码" $(( 1 | 8 | 32 ))
 			return 1
 			;;
 		15) # 身份信息已失效
@@ -761,6 +622,7 @@ xlnetacc_logout() {
 # 中止信号处理
 sigterm() {
 	_log "trap sigterm, exit" $(( 1 | 4 ))
+	captcha_clear stopped
 	xlnetacc_logout
 	rm -f "$down_state_file" "$up_state_file"
 	exit 0
@@ -790,11 +652,7 @@ xlnetacc_init() {
 	relogin=$(uci_get_by_name "general" "relogin" 0)
 	readonly username=$(uci_get_by_name "general" "account")
 	readonly password=$(uci_get_by_name "general" "password")
-	chatgpt_base_url=$(uci_get_by_name "general" "base_url" "https://openrouter.ai/api/v1")
-	chatgpt_model=$(uci_get_by_name "general" "model" "google/gemini-2.0-flash-exp:free")
-	chatgpt_api_key=$(uci_get_by_name "general" "api_key")
-	[ -z "$chatgpt_base_url" ] && chatgpt_base_url="https://openrouter.ai/api/v1"
-	[ -z "$chatgpt_model" ] && chatgpt_model="google/gemini-2.0-flash-exp:free"
+	ai_load_config
 	local enabled=$(uci_get_by_bool "general" "enabled" 0)
 	([ $enabled -eq 0 ] || [ $down_acc -eq 0 -a $up_acc -eq 0 ] || [ -z "$username" -o -z "$password" -o -z "$network" ]) && return 2
 	([ -z "$keepalive" -o -n "${keepalive//[0-9]/}" ] || [ $keepalive -lt 5 -o $keepalive -gt 60 ]) && keepalive=10
@@ -810,6 +668,12 @@ xlnetacc_init() {
 	command -v wget-ssl >/dev/null || { _log "GNU Wget 未安装"; return 3; }
 	local opensslchk=$(echo -n 'openssl' | openssl dgst -sha1 | awk '{print $2}')
 	[ "$opensslchk" != 'c898fa1e7226427010e329971e82c669f8d8abb4' ] && { _log "openssl-util 未安装或计算错误"; return 3; }
+
+	captcha_prepare || return 3
+	captcha_clear
+	# Remove files left by older versions; challenges now require a LuCI login.
+	rm -f /tmp/xlnetacc_verify.jpg /tmp/xlnetacc_verify_key /tmp/xlnetacc_verify_code \
+		/www/luci-static/resources/xlnetacc_verify.jpg
 
 	# 捕获中止信号
 	trap 'sigterm' INT # Ctrl-C
@@ -845,7 +709,7 @@ xlnetacc_main() {
 				-1) sleep 5s;; # 服务器未响应
 				-2) return 7;; # Wget 参数解析错误
 				-3) sleep 3s;; # Wget 网络通信失败
-				6) sleep 130m;; # 需要输入验证码
+				6) captcha_cooldown;; # 允许从 LuCI 重新获取验证码
 				8) sleep 3m;; # 服务器系统维护
 				15) sleep 1s;; # 身份信息已失效
 				*) return 5;; # 登录失败

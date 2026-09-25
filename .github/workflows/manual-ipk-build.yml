@@ -17,6 +17,10 @@ on:
       release_name:
         description: Release title (auto-generated if empty)
         required: false
+      publish_release:
+        description: Also publish the IPK as a GitHub Release
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -132,6 +136,7 @@ jobs:
           path: ${{ env.IPK_PATH }}
 
       - name: Set release variables
+        if: ${{ inputs.publish_release }}
         run: |
           rel_tag="${{ github.event.inputs.release_tag }}"
           rel_name="${{ github.event.inputs.release_name }}"
@@ -141,6 +146,7 @@ jobs:
           echo "REL_NAME=$rel_name" >> $GITHUB_ENV
 
       - name: Publish release asset
+        if: ${{ inputs.publish_release }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

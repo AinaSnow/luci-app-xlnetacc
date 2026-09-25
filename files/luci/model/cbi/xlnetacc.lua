@@ -48,13 +48,33 @@ o = s:option(Value, "account", translate("XLNetAcc account"))
 o = s:option(Value, "password", translate("XLNetAcc password"))
 o.password = true
 
-o = s:option(Value, "base_url", translate("Captcha AI Base URL"), translate("Endpoint base URL for captcha recognition, default uses OpenRoute."))
+o = s:option(Value, "base_url", translate("Captcha AI Base URL"), translate("Include the API prefix, for example https://api.example.com/v1. System routing is used."))
 o.placeholder = "https://openrouter.ai/api/v1"
+function o.validate(self, value)
+	if value and (value:match("^https?://[^%s]+$")) then return value end
+	return nil, translate("Enter a valid HTTP or HTTPS URL.")
+end
 
 o = s:option(Value, "api_key", translate("Captcha AI API Key"), translate("Leave empty to switch back to manual captcha input."))
 o.password = true
 
 o = s:option(Value, "model", translate("Captcha AI Model"), translate("Model name for captcha recognition."))
-o.placeholder = "google/gemini-2.0-flash-exp:free"
+o.placeholder = ""
+
+o = s:option(Value, "ai_timeout", translate("Recognition timeout"), translate("Total request timeout in seconds, including connection time."))
+o.datatype = "range(15,180)"
+o.default = "90"
+o.rmempty = false
+
+o = s:option(Value, "ai_max_tokens", translate("Model output limit"), translate("Increase this if a reasoning model returns no visible text. A fast vision model is recommended."))
+o.datatype = "range(64,8192)"
+o.default = "1024"
+o.rmempty = false
+
+o = s:option(ListValue, "captcha_length", translate("Captcha length"), translate("Only ASCII letters and digits are accepted. Select an exact length after checking your captcha."))
+o:value("0", translate("4 to 8 characters"))
+for _, v in ipairs({4, 5, 6, 7, 8}) do o:value(tostring(v)) end
+o.default = "0"
+o.rmempty = false
 
 return m

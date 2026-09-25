@@ -123,3 +123,87 @@ msgstr "无日志数据。"
 
 msgid "Error get log data."
 msgstr "获取日志数据失败。"
+
+msgid "Captcha verification"
+msgstr "验证码验证"
+
+msgid "Captcha image"
+msgstr "验证码图片"
+
+msgid "Captcha code"
+msgstr "验证码"
+
+msgid "Submit captcha"
+msgstr "提交验证码"
+
+msgid "Get a new captcha"
+msgstr "重新获取验证码"
+
+msgid "Save and apply your API settings before testing. The test uses a normal text image and does not log in to Xunlei."
+msgstr "请先保存并应用 API 配置。测试使用普通文字图片，不会登录迅雷帐号。"
+
+msgid "Test recognition service"
+msgstr "测试识别服务"
+
+msgid "No captcha required"
+msgstr "当前无需验证码"
+
+msgid "Start XLNetAcc to use captcha verification"
+msgstr "请启动迅雷快鸟后进行验证码验证"
+
+msgid "Downloading captcha..."
+msgstr "正在下载验证码…"
+
+msgid "Captcha ready"
+msgstr "验证码已就绪"
+
+msgid "Recognizing captcha..."
+msgstr "正在识别验证码…"
+
+msgid "Verifying captcha..."
+msgstr "正在提交验证…"
+
+msgid "Enter the captcha within 180 seconds"
+msgstr "请在 180 秒内输入验证码"
+
+msgid "Captcha input timed out. Get a new captcha to continue."
+msgstr "验证码输入已超时，请重新获取验证码继续。"
+
+msgid "Captcha download failed. Try again."
+msgstr "验证码下载失败，请重试。"
+
+msgid "Login failed. Check the log."
+msgstr "登录失败，请查看日志。"
+
+msgid "Request failed. Refresh the page and try again."
+msgstr "请求失败，请刷新页面后重试。"
+
+msgid "Test timed out. Please try again."
+msgstr "测试已超时，请重试。"
+
+msgid "Include the API prefix, for example https://api.example.com/v1. System routing is used."
+msgstr "请包含 API 前缀，例如 https://api.example.com/v1。识别请求使用系统路由。"
+
+msgid "Enter a valid HTTP or HTTPS URL."
+msgstr "请输入有效的 HTTP 或 HTTPS 地址。"
+
+msgid "Recognition timeout"
+msgstr "识别请求超时"
+
+msgid "Total request timeout in seconds, including connection time."
+msgstr "单次请求总时限（秒），包含连接时间。"
+
+msgid "Model output limit"
+msgstr "模型输出额度"
+
+msgid "Increase this if a reasoning model returns no visible text. A fast vision model is recommended."
+msgstr "推理模型不返回可见文本时可增大此值，建议使用响应快且支持图片的模型。"
+
+msgid "Captcha length"
+msgstr "验证码长度"
+
+msgid "Only ASCII letters and digits are accepted. Select an exact length after checking your captcha."
+msgstr "仅接受英文字母和数字。确认实际验证码后，可选择固定长度。"
+
+msgid "4 to 8 characters"
+msgstr "4 至 8 个字符"
