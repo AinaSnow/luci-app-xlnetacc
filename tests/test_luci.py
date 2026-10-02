@@ -34,7 +34,8 @@ luci = {
 nixio = {
     getpid = function() return 123 end,
     open_flags = function() return 0 end,
-    open = function(path)
+    open = function(path, flags, mode)
+        assert(mode == "600", "nixio.open requires an octal mode string")
         if files[path] then return nil end
         return {
             write = function(self, data) files[path] = data; return #data end,
@@ -62,6 +63,119 @@ class LuciTests(unittest.TestCase):
         self.lua.execute((ROOT/'files/luci/controller/xlnetacc.lua').read_text(encoding='utf-8'))
         self.controller = self.lua.eval("package.loaded['luci.controller.xlnetacc']")
         self.globals = self.lua.globals()
+
+    def prepare_web(self):
+        self.lua.execute('''
+        package.loaded['luci.model.uci'] = { cursor = function()
+            return {get = function() return 'web' end}
+        end }
+        package.preload['luci.jsonc'] = function()
+            return {parse = function() return {stage = web_stage or 'idle'} end}
+        end
+        ''')
+
+    def test_web_actions_are_csrf_protected_and_queued(self):
+        self.prepare_web()
+        self.globals.params.action = 'authorize'
+        self.globals.params.token = 'invalid'
+        self.controller.action_web()
+        self.assertEqual(self.globals.status_code, 403)
+        self.globals.params.token = 'valid'
+        self.controller.action_web()
+        self.assertEqual(self.globals.status_code, 200)
+        self.assertEqual(self.globals.files['/var/run/xlnetacc-web/request'], 'authorize\n')
+        self.assertEqual(len(self.globals.commands), 0)
+
+    def test_web_rejects_shell_text_and_stopped_service(self):
+        self.prepare_web()
+        self.globals.params.action = 'open; reboot'
+        self.controller.action_web()
+        self.assertEqual(self.globals.status_code, 400)
+        self.globals.params.action = 'open'
+        self.globals.running = False
+        self.controller.action_web()
+        self.assertEqual(self.globals.status_code, 409)
+
+    def test_web_pending_authorization_only_allows_cancel_or_forget(self):
+        self.prepare_web()
+        self.globals.web_stage = 'authorizing'
+        self.globals.params.action = 'open'
+        self.controller.action_web()
+        self.assertEqual(self.globals.status_code, 409)
+        self.globals.params.action = 'cancel'
+        self.controller.action_web()
+        self.assertEqual(self.globals.status_code, 200)
+
+    def test_web_stopped_status_hides_expired_login_link(self):
+        self.prepare_web()
+        self.globals.running = False
+        self.controller.action_status()
+        self.assertEqual(self.globals.response.protocol, 'web')
+        self.assertEqual(self.globals.response.web.stage, 'stopped')
+        self.assertIsNone(self.globals.response.web.authorization_url)
+
+    def test_oauth_return_requires_csrf_matching_state_and_single_use(self):
+        self.prepare_web()
+        state = 'a' * 64
+        self.globals.files['/var/run/xlnetacc-web/oauth.pending'] = state + '\n9999999999\n'
+        self.globals.params.state = state
+        self.globals.params.code = 'one-time-code'
+        self.globals.params.token = 'invalid'
+        self.controller.action_oauth_callback()
+        self.assertEqual(self.globals.status_code, 403)
+        self.globals.params.token = 'valid'
+        self.globals.params.state = 'wrong'
+        self.controller.action_oauth_callback()
+        self.assertEqual(self.globals.status_code, 409)
+        self.globals.params.state = state
+        self.controller.action_oauth_callback()
+        self.assertEqual(self.globals.status_code, 200)
+        self.assertEqual(self.globals.files['/var/run/xlnetacc-web/oauth.callback'], state + '\none-time-code\n')
+        self.controller.action_oauth_callback()
+        self.assertEqual(self.globals.status_code, 409)
+
+    def test_expired_and_control_character_oauth_codes_rejected(self):
+        state = 'b' * 64
+        self.globals.params.state = state
+        self.globals.params.code = 'code'
+        self.globals.files['/var/run/xlnetacc-web/oauth.pending'] = state + '\n1\n'
+        self.controller.action_oauth_callback()
+        self.assertEqual(self.globals.status_code, 409)
+        self.globals.files['/var/run/xlnetacc-web/oauth.pending'] = state + '\n9999999999\n'
+        self.globals.params.code = 'bad\ncode'
+        self.controller.action_oauth_callback()
+        self.assertEqual(self.globals.status_code, 400)
+
+    def test_protocol_switch_preserves_hidden_android_configuration(self):
+        self.lua.execute("""
+        options = {}
+        selected_protocol = 'web'
+        translate = function(s) return s end
+        debug.setmetatable('', {__index=string, __mod=function(s) return s end})
+        local cursor = {get=function() return 'android' end, foreach=function() end}
+        luci.model = {uci={cursor=function() return cursor end}}
+        Map = function()
+            local map = {append=function() end, formvalue=function() return selected_protocol end}
+            map.section = function()
+                return {option=function(section, kind, name)
+                    local option = {map=map, depends=function() end, value=function() end,
+                        parse=function() options[name].parsed=true end}
+                    options[name]=option; return option
+                end}
+            end
+            return map
+        end
+        Template = function() end
+        """)
+        self.lua.execute((ROOT/'files/luci/model/cbi/xlnetacc.lua').read_text(encoding='utf-8'))
+        for name in ['account', 'password', 'api_key', 'up_acc']:
+            option = self.globals.options[name]
+            option.parse(option, 'general')
+            self.assertIsNone(option.parsed)
+        self.globals.selected_protocol = 'android'
+        option = self.globals.options.password
+        option.parse(option, 'general')
+        self.assertTrue(option.parsed)
 
     def test_lua_model_syntax(self):
         source = (ROOT/'files/luci/model/cbi/xlnetacc.lua').read_text(encoding='utf-8')
