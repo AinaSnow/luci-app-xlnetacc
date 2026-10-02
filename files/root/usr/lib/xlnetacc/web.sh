@@ -29,6 +29,8 @@ web_state() {
 	json_add_string stage "$stage"
 	json_add_string message "$message"
 	json_add_boolean authenticated "$([ -s "$web_private/auth.json" ] && echo 1 || echo 0)"
+	json_add_int login_expires_at "${web_expires:-0}"
+	json_add_boolean can_refresh "$([ -n "$web_refresh_token" ] && echo 1 || echo 0)"
 	json_add_string authorization_url "$web_url"
 	json_add_string user_code "$web_user_code"
 	json_add_int expires_at "${web_auth_deadline:-0}"
@@ -49,11 +51,12 @@ web_load_auth() {
 	json_get_var web_expires expires_at
 	case "$web_sub" in ''|*[!0-9]*) return 1;; esac
 	case "$web_expires" in ''|*[!0-9]*) return 1;; esac
-	[ -n "$web_access" ] && [ -n "$web_refresh_token" ]
+	[ -n "$web_access" ]
 }
 
 web_save_auth() {
 	local access refresh sub lifetime old_refresh=$web_refresh_token old_sub=$web_sub
+	web_credential_error="响应不是有效 JSON"
 	json_load "$web_response" || return 1
 	json_get_var access access_token
 	json_get_var refresh refresh_token
@@ -64,12 +67,17 @@ web_save_auth() {
 		refresh=${refresh:-$old_refresh}; sub=${sub:-$old_sub}
 		[ "$sub" = "$old_sub" ] || return 1
 	fi
+	web_credential_error="sub 缺失或格式不支持"
 	case "$sub" in ''|*[!0-9]*) return 1;; esac
+	web_credential_error="expires_in 缺失或格式不支持"
 	case "$lifetime" in ''|*[!0-9]*) return 1;; esac
 	[ "$lifetime" -ge 60 ] && [ "$lifetime" -le 31536000 ] || return 1
-	[ -n "$access" ] && [ -n "$refresh" ] || return 1
+	web_credential_error="access_token 缺失"
+	[ -n "$access" ] || return 1
+	web_credential_error="token 格式不支持"
 	# Tokens become headers: reject control characters rather than sanitizing them.
 	case "$access$refresh" in *[![:graph:]]*) return 1;; esac
+	web_credential_error="无法保存授权文件"
 	web_access=$access; web_refresh_token=$refresh; web_sub=$sub
 	web_expires=$(( $(date +%s) + lifetime ))
 	json_init
@@ -123,6 +131,9 @@ web_refresh_auth() {
 	local force=${1:-0} error
 	web_load_auth || { web_state auth_required '请先完成官方网页登录授权'; return 1; }
 	[ "$force" -eq 0 ] && [ "$web_expires" -gt $(( $(date +%s) + 60 )) ] && return 0
+	if [ -z "$web_refresh_token" ]; then
+		web_forget; web_state auth_required "登录已失效，官方未提供刷新凭据，请重新网页登录"; return 1
+	fi
 	json_init
 	json_add_string client_id "$web_client"
 	json_add_string grant_type refresh_token
@@ -185,6 +196,10 @@ web_authorize() {
 			web_url=; web_user_code=; web_auth_deadline=0
 			web_state idle '授权成功，正在检查宽带状态'
 			return 0
+		fi
+		if [ "$web_http" = 200 ]; then
+			reason="HTTP 200，$web_credential_error"
+			break
 		fi
 		json_load "$web_response" >/dev/null 2>&1 && json_get_var reason error
 		case "$reason" in ''|*[!a-zA-Z0-9_-]*) reason="HTTP $web_http";; *) reason="HTTP $web_http，$reason";; esac

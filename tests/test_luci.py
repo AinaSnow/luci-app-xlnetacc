@@ -146,6 +146,37 @@ class LuciTests(unittest.TestCase):
         self.controller.action_oauth_callback()
         self.assertEqual(self.globals.status_code, 400)
 
+    def test_protocol_switch_preserves_hidden_android_configuration(self):
+        self.lua.execute("""
+        options = {}
+        selected_protocol = 'web'
+        translate = function(s) return s end
+        debug.setmetatable('', {__index=string, __mod=function(s) return s end})
+        local cursor = {get=function() return 'android' end, foreach=function() end}
+        luci.model = {uci={cursor=function() return cursor end}}
+        Map = function()
+            local map = {append=function() end, formvalue=function() return selected_protocol end}
+            map.section = function()
+                return {option=function(section, kind, name)
+                    local option = {map=map, depends=function() end, value=function() end,
+                        parse=function() options[name].parsed=true end}
+                    options[name]=option; return option
+                end}
+            end
+            return map
+        end
+        Template = function() end
+        """)
+        self.lua.execute((ROOT/'files/luci/model/cbi/xlnetacc.lua').read_text(encoding='utf-8'))
+        for name in ['account', 'password', 'api_key', 'up_acc']:
+            option = self.globals.options[name]
+            option.parse(option, 'general')
+            self.assertIsNone(option.parsed)
+        self.globals.selected_protocol = 'android'
+        option = self.globals.options.password
+        option.parse(option, 'general')
+        self.assertTrue(option.parsed)
+
     def test_lua_model_syntax(self):
         source = (ROOT/'files/luci/model/cbi/xlnetacc.lua').read_text(encoding='utf-8')
         self.lua.execute('assert(loadstring(...))', source)

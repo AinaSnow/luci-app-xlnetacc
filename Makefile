@@ -44,8 +44,8 @@ exit 0
 endef
 
 define Package/$(PKG_NAME)/conffiles
-	/etc/config/xlnetacc
-	/etc/xlnetacc-web/
+/etc/config/xlnetacc
+/etc/xlnetacc-web/
 endef
 
 define Package/$(PKG_NAME)/install
@@ -57,6 +57,8 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_DATA) ./files/luci/model/cbi/*.lua $(1)/usr/lib/lua/luci/model/cbi/
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/xlnetacc
 	$(INSTALL_DATA) ./files/luci/view/xlnetacc/*.htm $(1)/usr/lib/lua/luci/view/xlnetacc/
+	$(INSTALL_DIR) $(1)/etc/xlnetacc-web
+	chmod 0700 $(1)/etc/xlnetacc-web
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/root/etc/config/xlnetacc $(1)/etc/config/xlnetacc
 	$(INSTALL_DIR) $(1)/etc/init.d

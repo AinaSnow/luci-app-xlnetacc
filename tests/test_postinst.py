@@ -31,7 +31,12 @@ class PostinstTests(unittest.TestCase):
             with tarfile.open(fileobj=io.BytesIO(blobs['control.tar.gz'])) as control:
                 scripts = {m.name.removeprefix('./'): control.extractfile(m).read() for m in control if m.isfile()}
             with tarfile.open(fileobj=io.BytesIO(blobs['data.tar.gz'])) as data:
-                names = [m.name.removeprefix('./') for m in data if m.isfile()]
+                members = {m.name.removeprefix('./'): m for m in data}
+                names = [name for name, m in members.items() if m.isfile()]
+                keep = data.extractfile(members['lib/upgrade/keep.d/luci-app-xlnetacc']).read()
+                self.assertIn(b'/etc/xlnetacc-web/', keep)
+                self.assertEqual(members['etc/xlnetacc-web'].mode & 0o777, 0o700)
+            self.assertIn(b'/etc/config/xlnetacc', scripts.get('conffiles', b''))
             self.assertIn('etc/uci-defaults/luci-xlnetacc', names)
             self.assertIn(b'default_postinst', scripts['postinst'])
             body = scripts['postinst-pkg'].decode('utf-8')

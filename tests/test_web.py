@@ -90,6 +90,22 @@ assert_stage idle
 [ ! -f "$web_private/auth.json" ] && [ ! -f "$web_dir/oauth.pending" ] && [ -z "$web_url" ]
 ''')
 
+    def test_access_only_login_works_until_expiry_without_fake_refresh(self):
+        self.run_shell(r'''
+web_response='{"access_token":"access-only","sub":"123","expires_in":3600}'
+web_save_auth login || exit 1
+web_load_auth || exit 2
+web_http_request() { exit 10; }
+web_refresh_auth || exit 3
+[ -z "$web_refresh_token" ] || exit 4
+web_state idle test
+json_load "$(cat "$web_dir/status.json")"; json_get_var flag can_refresh
+[ "$flag" = 0 ] || exit 5
+if web_refresh_auth 1; then exit 6; fi
+assert_stage auth_required
+[ ! -f "$web_private/auth.json" ] || exit 7
+''')
+
     def test_refresh_rotation_preserves_subject_and_omitted_refresh(self):
         self.run_shell(r'''
 fixture_auth
