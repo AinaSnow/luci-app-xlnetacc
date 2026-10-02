@@ -45,6 +45,10 @@ assert.equal(el('authorization').style.display, 'none');
 update({protocol: 'web', run_state: true, web: {stage: 'active', authenticated: true, message: '<img onerror=bad>'}});
 assert.equal(el('message').textContent, '<img onerror=bad>');
 assert.equal(el('close').disabled, false);
+update({protocol: 'web', run_state: true, web: {stage: 'active', authenticated: true,
+    can_reauthorize: true, login_expires_at: Date.now()/1000 + 7200}});
+assert(el('expiry').textContent.includes('到期前自动续登'));
+assert(!el('expiry').textContent.includes('官方未提供'));
 el('close').onclick();
 assert.equal(requests[2].data.action, 'close');
 update({protocol: 'web', run_state: false, web: {}});

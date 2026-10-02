@@ -90,7 +90,7 @@ assert_stage idle
 [ ! -f "$web_private/auth.json" ] && [ ! -f "$web_dir/oauth.pending" ] && [ -z "$web_url" ]
 ''')
 
-    def test_access_only_login_works_until_expiry_without_fake_refresh(self):
+    def test_access_only_login_cannot_reauthorize_after_expiry(self):
         self.run_shell(r'''
 web_response='{"access_token":"access-only","sub":"123","expires_in":3600}'
 web_save_auth login || exit 1
@@ -101,9 +101,114 @@ web_refresh_auth || exit 3
 web_state idle test
 json_load "$(cat "$web_dir/status.json")"; json_get_var flag can_refresh
 [ "$flag" = 0 ] || exit 5
+json_get_var flag can_reauthorize; [ "$flag" = 1 ] || exit 8
+expired=$((web_expires+1))
+date() { printf '%s\n' "$expired"; }
 if web_refresh_auth 1; then exit 6; fi
 assert_stage auth_required
 [ ! -f "$web_private/auth.json" ] || exit 7
+''')
+
+    def test_access_only_renews_early_using_same_client_pkce_and_verified_account(self):
+        self.run_shell(r'''
+web_response='{"access_token":"original-secret","sub":"123","expires_in":600}'
+web_save_auth login || exit 1
+calls=0
+web_http_request() {
+    calls=$((calls+1)); web_http=200
+    case "$2" in
+        v1/user/authorize)
+            [ "$web_access" = 'Bearer original-secret' ] || exit 10
+            [ "$3" = POST ] && [ "$4" = token ] || exit 11
+            json_get_var client client_id; [ "$client" = "$web_client" ] || exit 12
+            json_get_var scope scope; [ "$scope" = 'profile user sso' ] || exit 13
+            json_get_var sent_state state; [ "${#sent_state}" -eq 64 ] || exit 14
+            json_get_var sent_challenge code_challenge
+            json_get_var method code_challenge_method; [ "$method" = S256 ] || exit 15
+            json_get_var redirect redirect_uri
+            [ "$redirect" = https://vip.xunlei.com/pages/2023/broadband-speed/m/ ] || exit 16
+            web_response="{\"code\":\"one-time\",\"state\":\"$sent_state\"}";;
+        v1/auth/token)
+            [ "$4" = none ] || exit 17
+            json_get_var verifier code_verifier
+            derived=$(printf '%s' "$verifier" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+            [ "$derived" = "$sent_challenge" ] || exit 18
+            json_get_var grant grant_type; [ "$grant" = authorization_code ] || exit 19
+            web_response='{"access_token":"new-secret","sub":"123","expires_in":7200}' ;;
+        v1/user/me)
+            [ "$web_access" = 'Bearer new-secret' ] || exit 20
+            # The original credential must still be on disk until verified.
+            grep -q original-secret "$web_private/auth.json" || exit 21
+            web_response='{"sub":"123"}';;
+        *) exit 22;;
+    esac
+}
+web_refresh_auth || exit 2
+[ "$calls" -eq 3 ] || exit 3
+web_load_auth || exit 4
+[ "$web_access" = new-secret ] && [ -z "$web_refresh_token" ] || exit 5
+[ "$web_expires" -gt $(( $(date +%s) + 7000 )) ] || exit 6
+web_state active renewed
+if grep -E 'original-secret|new-secret|one-time' "$web_dir/status.json"; then exit 7; fi
+''')
+
+    def test_reauthorize_network_and_wrong_state_preserve_current_credential(self):
+        self.run_shell(r'''
+web_response='{"access_token":"original-secret","sub":"123","expires_in":600}'
+web_save_auth login || exit 1
+cp "$web_private/auth.json" "$TEST_TMP/original"
+web_http_request() { web_error=offline; return 1; }
+if web_refresh_auth; then exit 2; fi
+cmp "$web_private/auth.json" "$TEST_TMP/original" || exit 3
+[ "$web_access" = original-secret ] || exit 4
+assert_stage network_error
+web_http_request() {
+    [ "$2" = v1/user/authorize ] || exit 10
+    web_http=200; web_response='{"code":"unused","state":"wrong-state"}'
+}
+if web_refresh_auth; then exit 5; fi
+cmp "$web_private/auth.json" "$TEST_TMP/original" || exit 6
+assert_stage auth_error
+''')
+
+    def test_reauthorize_rejects_wrong_account_before_replacing_credentials(self):
+        for failure in ('token_subject', 'profile_subject', 'profile_http', 'exchange_http'):
+            with self.subTest(failure=failure):
+                self.run_shell('failure=' + failure + '\n' + r'''
+web_response='{"access_token":"original-secret","sub":"123","expires_in":600}'
+web_save_auth login || exit 1
+cp "$web_private/auth.json" "$TEST_TMP/original"
+web_http_request() {
+    web_http=200
+    case "$2" in
+        v1/user/authorize)
+            json_get_var sent_state state
+            web_response="{\"code\":\"one-time\",\"state\":\"$sent_state\"}";;
+        v1/auth/token)
+            web_response='{"access_token":"candidate-secret","sub":"123","expires_in":7200}'
+            [ "$failure" != token_subject ] || web_response='{"access_token":"candidate-secret","sub":"999","expires_in":7200}'
+            [ "$failure" != exchange_http ] || web_http=400;;
+        v1/user/me)
+            web_response='{"sub":"999"}'
+            [ "$failure" != profile_http ] || web_http=401;;
+        *) exit 10;;
+    esac
+    return 0
+}
+if web_refresh_auth; then exit 2; fi
+cmp "$web_private/auth.json" "$TEST_TMP/original" || exit 3
+[ "$web_access" = original-secret ] || exit 4
+assert_stage auth_error
+''')
+
+    def test_reauthorize_rejected_old_credential_requires_login(self):
+        self.run_shell(r'''
+web_response='{"access_token":"original-secret","sub":"123","expires_in":600}'
+web_save_auth login || exit 1
+web_http_request() { web_http=401; web_response='{"error":"unauthenticated"}'; }
+if web_refresh_auth; then exit 2; fi
+assert_stage auth_required
+[ ! -f "$web_private/auth.json" ]
 ''')
 
     def test_refresh_rotation_preserves_subject_and_omitted_refresh(self):

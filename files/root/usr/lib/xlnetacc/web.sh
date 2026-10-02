@@ -31,6 +31,7 @@ web_state() {
 	json_add_boolean authenticated "$([ -s "$web_private/auth.json" ] && echo 1 || echo 0)"
 	json_add_int login_expires_at "${web_expires:-0}"
 	json_add_boolean can_refresh "$([ -n "$web_refresh_token" ] && echo 1 || echo 0)"
+	json_add_boolean can_reauthorize "$([ -n "$web_access" ] && [ "${web_expires:-0}" -gt "$(date +%s)" ] && echo 1 || echo 0)"
 	json_add_string authorization_url "$web_url"
 	json_add_string user_code "$web_user_code"
 	json_add_int expires_at "${web_auth_deadline:-0}"
@@ -69,6 +70,7 @@ web_save_auth() {
 	fi
 	web_credential_error="sub 缺失或格式不支持"
 	case "$sub" in ''|*[!0-9]*) return 1;; esac
+	[ "$1" = login ] || [ "$sub" = "$old_sub" ] || return 1
 	web_credential_error="expires_in 缺失或格式不支持"
 	case "$lifetime" in ''|*[!0-9]*) return 1;; esac
 	[ "$lifetime" -ge 60 ] && [ "$lifetime" -le 31536000 ] || return 1
@@ -127,12 +129,92 @@ web_http_request() {
 	return 1
 }
 
+# The official authorize endpoint accepts the current Bearer credential. This
+# obtains another code for the SAME client/scopes, with fresh PKCE, while valid.
+# It cannot recover an already expired credential and never uses browser cookies.
+web_reauthorize() {
+	local saved_access=$web_access saved_sub=$web_sub verifier challenge state code returned
+	local result candidate candidate_sub candidate_response error
+	verifier=$(openssl rand -hex 32) || return 1
+	state=$(openssl rand -hex 32) || return 1
+	challenge=$(printf '%s' "$verifier" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+	[ "${#verifier}" -eq 64 ] && [ "${#state}" -eq 64 ] && [ "${#challenge}" -eq 43 ] || return 1
+	json_init
+	json_add_string client_id "$web_client"
+	json_add_string response_type code
+	json_add_string redirect_uri 'https://vip.xunlei.com/pages/2023/broadband-speed/m/'
+	json_add_string scope 'profile user sso'
+	json_add_string state "$state"
+	json_add_string code_challenge "$challenge"
+	json_add_string code_challenge_method S256
+	web_access="Bearer $saved_access"
+	web_http_request "$web_auth_origin" v1/user/authorize POST token
+	result=$?
+	web_access=$saved_access
+	if [ "$result" -ne 0 ]; then web_state network_error "$web_error"; return 1; fi
+	if [ "$web_http" = 401 ]; then
+		web_forget; web_state auth_required '登录凭据已被拒绝，请重新网页登录'; return 1
+	fi
+	if [ "$web_http" != 200 ]; then
+		web_state auth_error "自动续登暂未成功（授权 HTTP $web_http），保留原凭据，稍后重试"; return 1
+	fi
+	if ! json_load "$web_response"; then
+		web_state auth_error '自动续登响应无效，保留原凭据，稍后重试'; return 1
+	fi
+	json_get_var code code
+	json_get_var returned state
+	if [ "$returned" != "$state" ] || [ -z "$code" ] || [ "${#code}" -gt 4096 ]; then
+		web_state auth_error '自动续登响应不匹配，保留原凭据'; return 1
+	fi
+	case "$code" in *[![:graph:]]*) web_state auth_error '自动续登授权码格式无效，保留原凭据'; return 1;; esac
+	json_init
+	json_add_string client_id "$web_client"
+	json_add_string grant_type authorization_code
+	json_add_string code "$code"
+	json_add_string code_verifier "$verifier"
+	json_add_string redirect_uri 'https://vip.xunlei.com/pages/2023/broadband-speed/m/'
+	web_http_request "$web_auth_origin" v1/auth/token POST none || {
+		web_state network_error "$web_error"; return 1
+	}
+	if [ "$web_http" != 200 ]; then
+		web_state auth_error "自动续登暂未成功（换取凭据 HTTP $web_http），保留原凭据，稍后重试"; return 1
+	fi
+	candidate_response=$web_response
+	json_load "$candidate_response" >/dev/null 2>&1 || return 1
+	json_get_var candidate access_token
+	json_get_var candidate_sub sub
+	if [ "$candidate_sub" != "$saved_sub" ] || [ -z "$candidate" ]; then
+		web_state auth_error '自动续登账号不匹配或缺少凭据，保留原凭据'; return 1
+	fi
+	case "$candidate" in *[![:graph:]]*) web_state auth_error '自动续登凭据格式无效，保留原凭据'; return 1;; esac
+	# Check the new credential before atomically replacing the working one.
+	web_access="Bearer $candidate"
+	web_http_request "$web_auth_origin" v1/user/me GET token
+	result=$?
+	web_access=$saved_access
+	if [ "$result" -ne 0 ]; then web_state network_error "$web_error"; return 1; fi
+	candidate_sub=
+	if [ "$web_http" = 200 ] && json_load "$web_response"; then json_get_var candidate_sub sub; fi
+	if [ "$candidate_sub" != "$saved_sub" ]; then
+		web_state auth_error '新凭据尚未通过账号验证，保留原凭据，稍后重试'; return 1
+	fi
+	web_response=$candidate_response
+	if web_save_auth reauthorize; then return 0; fi
+	web_load_auth >/dev/null 2>&1
+	web_state auth_error '无法保存自动续登凭据，保留原授权，稍后重试'
+	return 1
+}
+
 web_refresh_auth() {
-	local force=${1:-0} error
+	local force=${1:-0} error margin=60 now
 	web_load_auth || { web_state auth_required '请先完成官方网页登录授权'; return 1; }
-	[ "$force" -eq 0 ] && [ "$web_expires" -gt $(( $(date +%s) + 60 )) ] && return 0
+	now=$(date +%s)
+	# The daemon checks every five minutes: a 15-minute window permits retries.
+	[ -n "$web_refresh_token" ] || margin=900
+	[ "$force" -eq 0 ] && [ "$web_expires" -gt $(( now + margin )) ] && return 0
 	if [ -z "$web_refresh_token" ]; then
-		web_forget; web_state auth_required "登录已失效，官方未提供刷新凭据，请重新网页登录"; return 1
+		if [ "$web_expires" -gt "$now" ]; then web_reauthorize; return $?; fi
+		web_forget; web_state auth_required '登录已过期，未能在到期前续登，请重新网页登录'; return 1
 	fi
 	json_init
 	json_add_string client_id "$web_client"
