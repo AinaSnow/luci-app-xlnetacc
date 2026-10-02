@@ -34,7 +34,8 @@ luci = {
 nixio = {
     getpid = function() return 123 end,
     open_flags = function() return 0 end,
-    open = function(path)
+    open = function(path, flags, mode)
+        assert(mode == "600", "nixio.open requires an octal mode string")
         if files[path] then return nil end
         return {
             write = function(self, data) files[path] = data; return #data end,

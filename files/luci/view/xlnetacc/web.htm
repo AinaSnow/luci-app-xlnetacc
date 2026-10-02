@@ -53,13 +53,13 @@
 			if (el(action).disabled) return;
 			busy = true; render();
 			var finished = false;
-			function done(result) {
+			function done(result, xhr) {
 				if (finished) return; finished = true; clearTimeout(timer);
-				busy = false; el('feedback').textContent = result && result.message || '请求失败，请重试'; render();
+				busy = false; el('feedback').textContent = result && result.message || (xhr ? '请求失败（HTTP ' + xhr.status + '），请刷新页面后重试' : '请求超时，请检查路由器服务'); render();
 			}
 			var timer = setTimeout(function() { done(null); }, 15000);
 			new XHR().post('<%=luci.dispatcher.build_url("admin", "services", "xlnetacc", "web_action")%>',
-				{token: '<%=luci.dispatcher.context.authtoken%>', action: action}, function(xhr, result) { done(result); }, 15);
+				{token: '<%=luci.dispatcher.context.authtoken%>', action: action}, function(xhr, result) { done(result, xhr); }, 15);
 		};
 	});
 	el('submit').onclick = function() {
@@ -72,16 +72,16 @@
 		} catch (e) { el('feedback').textContent = '请粘贴登录完成后含 code 和 state 的迅雷返回地址'; return; }
 		busy = true; render();
 		var finished = false;
-		function done(result) {
+		function done(result, xhr) {
 			if (finished) return; finished = true; clearTimeout(timer);
 			busy = false;
 			if (result && result.ok) el('return-url').value = '';
-			el('feedback').textContent = result && result.message || '提交失败，请重试'; render();
+			el('feedback').textContent = result && result.message || (xhr ? '提交失败（HTTP ' + xhr.status + '），请刷新页面后重试' : '提交超时，请检查路由器服务'); render();
 		}
 		var timer = setTimeout(function() { done(null); }, 15000);
 		new XHR().post('<%=luci.dispatcher.build_url("admin", "services", "xlnetacc", "oauth_callback")%>',
 			{token: '<%=luci.dispatcher.context.authtoken%>', state: url.searchParams.get('state'), code: url.searchParams.get('code')},
-			function(xhr, result) { done(result); }, 15);
+			function(xhr, result) { done(result, xhr); }, 15);
 	};
 	window.xlnetaccWebUpdate = function(status) {
 		el('panel').style.display = status.protocol === 'web' ? '' : 'none';

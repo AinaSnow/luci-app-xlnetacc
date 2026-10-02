@@ -83,7 +83,7 @@ function action_web()
 		return reply(409, "正在等待授权，请先完成或取消")
 	end
 	local path = "/var/run/xlnetacc-web/request." .. nixio.getpid()
-	local fd = nixio.open(path, nixio.open_flags("wronly", "creat", "excl"), 384)
+	local fd = nixio.open(path, nixio.open_flags("wronly", "creat", "excl"), "600")
 	if not fd then return reply(503, "无法排队操作") end
 	local data = action .. "\n"
 	local written = fd:write(data)
@@ -110,7 +110,7 @@ function action_oauth_callback()
 	end
 	if #code == 0 or #code > 4096 or code:find("%c") then return reply(400, "授权响应无效") end
 	local path = "/var/run/xlnetacc-web/oauth.callback." .. nixio.getpid()
-	local fd = nixio.open(path, nixio.open_flags("wronly", "creat", "excl"), 384)
+	local fd = nixio.open(path, nixio.open_flags("wronly", "creat", "excl"), "600")
 	if not fd then return reply(503, "无法保存授权响应") end
 	local data = state .. "\n" .. code .. "\n"
 	local written = fd:write(data)
@@ -157,7 +157,7 @@ function action_captcha()
 		return reply(409, "当前无法刷新验证码")
 	end
 	local path = runtime .. "/request." .. nixio.getpid()
-	local fd = nixio.open(path, nixio.open_flags("wronly", "creat", "excl"), 384)
+	local fd = nixio.open(path, nixio.open_flags("wronly", "creat", "excl"), "600")
 	if not fd then return reply(503, "无法写入请求，请稍后重试") end
 	local data = generation .. "\n" .. action .. "\n" .. code .. "\n"
 	local written = fd:write(data)
