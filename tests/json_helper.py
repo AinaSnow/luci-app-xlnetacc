@@ -58,6 +58,6 @@ elif op in ('get', 'type', 'assign', 'assign_type'):
     except (KeyError, IndexError): value = None
     if op in ('type', 'assign_type'):
         value = {str: 'string', dict: 'object', list: 'array', int: 'int', type(None): 'null'}.get(type(value), 'boolean')
-    value = '' if value is None else str(value)
+    value = '' if value is None else str(int(value)) if isinstance(value, bool) else str(value)
     print(variable + '=' + shlex.quote(value) if variable else value, end='')
 path.write_text(json.dumps(state))

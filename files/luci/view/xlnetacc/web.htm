@@ -1,0 +1,91 @@
+<fieldset id="xlnetacc-web-panel" class="cbi-section" style="display:none">
+	<legend>官方网页登录与提速</legend>
+	<p>保存并应用设置后，点击登录，在迅雷官方页面确认授权。授权保存在路由器上，后续自动刷新。</p>
+	<p id="xlnetacc-web-message" aria-live="polite"></p>
+	<p id="xlnetacc-web-rates"></p>
+	<p id="xlnetacc-web-authorization" style="display:none">
+		<a id="xlnetacc-web-link" target="_blank" rel="noopener noreferrer">打开迅雷官方登录页面</a>
+		<span id="xlnetacc-web-code"></span>
+	</p>
+	<p id="xlnetacc-web-return" style="display:none">
+		<label for="xlnetacc-web-return-url">登录后返回页面的完整地址</label>
+		<input id="xlnetacc-web-return-url" type="password" autocomplete="off" style="width:80%" placeholder="从浏览器地址栏复制，粘贴到这里" />
+		<button id="xlnetacc-web-submit" type="button" class="cbi-button cbi-button-apply">完成授权</button>
+		<br />地址含一次性授权码，请只粘贴到此处，不要分享。
+	</p>
+	<p>
+		<button id="xlnetacc-web-authorize" type="button" class="cbi-button cbi-button-apply">官方网页登录授权</button>
+		<button id="xlnetacc-web-cancel" type="button" class="cbi-button" style="display:none">取消授权</button>
+		<button id="xlnetacc-web-check" type="button" class="cbi-button">检查状态</button>
+		<button id="xlnetacc-web-open" type="button" class="cbi-button">开启提速</button>
+		<button id="xlnetacc-web-close" type="button" class="cbi-button">暂停提速</button>
+		<button id="xlnetacc-web-forget" type="button" class="cbi-button">移除本机授权</button>
+	</p>
+	<p id="xlnetacc-web-feedback" aria-live="polite"></p>
+	<p>暂停后不会自动重新开启，直到点击“开启提速”。移除授权仅清除本机凭据；需要停止提速时请先暂停。</p>
+	<p><a href="https://vip.xunlei.com/pages/2023/broadband-speed/m/" target="_blank" rel="noopener noreferrer">在官方页面查看权益与绑定宽带</a>（应连接需要提速的宽带，并使用同一账号）</p>
+</fieldset>
+<script type="text/javascript">//<![CDATA[
+(function() {
+	var busy = false, running = false, state = {};
+	var actions = ['authorize', 'cancel', 'check', 'open', 'close', 'forget'];
+	function el(id) { return document.getElementById('xlnetacc-web-' + id); }
+	function render() {
+		var authorizing = state.stage === 'authorizing';
+		el('message').textContent = state.message || '';
+		el('rates').textContent = state.target_rate_down ? '基础带宽：' + state.basic_rate_down + 'M；目标带宽：' + state.target_rate_down + 'M（实际速率请测速确认）' : '';
+		var url = state.authorization_url || '';
+		var valid = authorizing && /^https:\/\/i\.xunlei\.com\/center\/account\/personal\/oauth\/\?/.test(url) && Number(state.expires_at) > Date.now()/1000;
+		el('authorization').style.display = valid ? '' : 'none';
+		if (valid) { el('link').href = url; } else { el('link').removeAttribute('href'); }
+		el('code').textContent = valid ? ' 登录后回到这里粘贴返回地址' : '';
+		el('return').style.display = valid ? '' : 'none';
+		el('submit').disabled = busy || !running || !valid;
+		if (!valid) el('return-url').value = '';
+		el('cancel').style.display = authorizing ? '' : 'none';
+		actions.forEach(function(action) {
+			el(action).disabled = busy || !running || (authorizing && action !== 'cancel' && action !== 'forget') ||
+				((action === 'open' || action === 'close' || action === 'forget') && !state.authenticated && !authorizing);
+		});
+	}
+	actions.forEach(function(action) {
+		el(action).onclick = function() {
+			if (el(action).disabled) return;
+			busy = true; render();
+			var finished = false;
+			function done(result) {
+				if (finished) return; finished = true; clearTimeout(timer);
+				busy = false; el('feedback').textContent = result && result.message || '请求失败，请重试'; render();
+			}
+			var timer = setTimeout(function() { done(null); }, 15000);
+			new XHR().post('<%=luci.dispatcher.build_url("admin", "services", "xlnetacc", "web_action")%>',
+				{token: '<%=luci.dispatcher.context.authtoken%>', action: action}, function(xhr, result) { done(result); }, 15);
+		};
+	});
+	el('submit').onclick = function() {
+		if (el('submit').disabled) return;
+		var url;
+		try {
+			url = new URL(el('return-url').value.trim());
+			if (url.origin !== 'https://vip.xunlei.com' || url.pathname !== '/pages/2023/broadband-speed/m/' ||
+				!url.searchParams.get('code') || !url.searchParams.get('state')) throw new Error();
+		} catch (e) { el('feedback').textContent = '请粘贴登录完成后含 code 和 state 的迅雷返回地址'; return; }
+		busy = true; render();
+		var finished = false;
+		function done(result) {
+			if (finished) return; finished = true; clearTimeout(timer);
+			busy = false;
+			if (result && result.ok) el('return-url').value = '';
+			el('feedback').textContent = result && result.message || '提交失败，请重试'; render();
+		}
+		var timer = setTimeout(function() { done(null); }, 15000);
+		new XHR().post('<%=luci.dispatcher.build_url("admin", "services", "xlnetacc", "oauth_callback")%>',
+			{token: '<%=luci.dispatcher.context.authtoken%>', state: url.searchParams.get('state'), code: url.searchParams.get('code')},
+			function(xhr, result) { done(result); }, 15);
+	};
+	window.xlnetaccWebUpdate = function(status) {
+		el('panel').style.display = status.protocol === 'web' ? '' : 'none';
+		running = !!status.run_state && status.protocol === 'web'; state = status.web || {}; render();
+	};
+})();
+//]]></script>
