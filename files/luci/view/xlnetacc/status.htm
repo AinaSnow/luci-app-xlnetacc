@@ -7,7 +7,8 @@
 	</table>
 </fieldset>
 
-<%+xlnetacc/captcha%>
+<div id="xlnetacc-legacy-panel" style="display:none"><%+xlnetacc/captcha%></div>
+<%+xlnetacc/web%>
 
 <script type="text/javascript">//<![CDATA[
 	var run_state = document.getElementById('_run_state');
@@ -15,10 +16,18 @@
 	var up_state = document.getElementById('_up_state');
 	XHR.poll(5, '<%=luci.dispatcher.build_url("admin", "services", "xlnetacc", "status")%>', null, function(x, status) {
 		if ( x && x.status == 200 ) {
-			window.xlnetaccCaptchaUpdate(status);
+			var modern = status.protocol === 'web';
+			document.getElementById('xlnetacc-legacy-panel').style.display = modern ? 'none' : '';
+			window.xlnetaccWebUpdate(status);
+			if (!modern) window.xlnetaccCaptchaUpdate(status);
 			run_state.innerHTML = status.run_state ? '<%:RUNNING%>' : '<%:NOT RUNNING%>';
-			down_state.innerHTML = status.down_state ? status.down_state : '<%:No upgrade information%>';
-			up_state.innerHTML = status.up_state ? status.up_state : '<%:No upgrade information%>';
+			if (modern) {
+				down_state.textContent = (status.web || {}).message || '等待状态更新';
+				up_state.textContent = '新版按官方宽带权益处理';
+			} else {
+				down_state.innerHTML = status.down_state ? status.down_state : '<%:No upgrade information%>';
+				up_state.innerHTML = status.up_state ? status.up_state : '<%:No upgrade information%>';
+			}
 		}
 	});
 //]]></script>

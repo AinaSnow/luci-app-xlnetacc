@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-xlnetacc
-PKG_VERSION:=1.1.0
+PKG_VERSION:=1.2.0
 PKG_RELEASE:=2
 
 PKG_LICENSE:=GPLv2
@@ -44,7 +44,8 @@ exit 0
 endef
 
 define Package/$(PKG_NAME)/conffiles
-	/etc/config/xlnetacc
+/etc/config/xlnetacc
+/etc/xlnetacc-web/
 endef
 
 define Package/$(PKG_NAME)/install
@@ -56,6 +57,8 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_DATA) ./files/luci/model/cbi/*.lua $(1)/usr/lib/lua/luci/model/cbi/
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/xlnetacc
 	$(INSTALL_DATA) ./files/luci/view/xlnetacc/*.htm $(1)/usr/lib/lua/luci/view/xlnetacc/
+	$(INSTALL_DIR) $(1)/etc/xlnetacc-web
+	chmod 0700 $(1)/etc/xlnetacc-web
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/root/etc/config/xlnetacc $(1)/etc/config/xlnetacc
 	$(INSTALL_DIR) $(1)/etc/init.d
@@ -67,8 +70,10 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) ./files/root/usr/bin/xlnetacc.sh $(1)/usr/bin/xlnetacc.sh
 	$(INSTALL_BIN) ./files/root/usr/bin/xlnetacc-test $(1)/usr/bin/xlnetacc-test
+	$(INSTALL_BIN) ./files/root/usr/bin/xlnetacc-web $(1)/usr/bin/xlnetacc-web
 	$(INSTALL_DIR) $(1)/usr/lib/xlnetacc
 	$(INSTALL_DATA) ./files/root/usr/lib/xlnetacc/captcha.sh $(1)/usr/lib/xlnetacc/captcha.sh
+	$(INSTALL_DATA) ./files/root/usr/lib/xlnetacc/web.sh $(1)/usr/lib/xlnetacc/web.sh
 	$(INSTALL_DIR) $(1)/usr/share/xlnetacc
 	$(INSTALL_DATA) ./files/root/usr/share/xlnetacc/test.png $(1)/usr/share/xlnetacc/test.png
 endef

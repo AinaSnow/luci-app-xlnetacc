@@ -1,0 +1,37 @@
+#!/bin/sh
+. /usr/share/libubox/jshn.sh
+. /usr/lib/xlnetacc/web.sh
+
+web_prepare || exit 1
+rm -f "$web_dir/oauth.pending" "$web_dir/oauth.callback"
+trap 'rm -f "$web_dir/oauth.pending" "$web_dir/oauth.callback"; web_url=; web_user_code=; web_auth_deadline=0; web_state stopped "服务已停止"; exit 0' INT TERM
+web_state idle '正在检查授权与宽带状态'
+next_check=0
+while :; do
+	web_take_action
+	case "$web_action" in
+		forget) web_forget; next_check=$(( $(date +%s) + 300 ));;
+		authorize)
+			next_check=$(( $(date +%s) + 300 ))
+			if web_network && web_authorize; then next_check=0; else next_check=$(( $(date +%s) + 300 )); fi;;
+		check) next_check=0;;
+		open)
+			rm -f "$web_private/paused"
+			if web_network; then web_open; fi
+			next_check=$(( $(date +%s) + 300 ));;
+		close)
+			: > "$web_private/paused"
+			if web_network; then web_close; fi
+			next_check=$(( $(date +%s) + 300 ));;
+	esac
+	if [ "$(date +%s)" -ge "$next_check" ]; then
+		if web_network && web_check; then
+			if [ "$web_can_open" -eq 1 ] && [ "$web_speed" -eq 0 ] &&
+				[ ! -f "$web_private/paused" ] && [ "$(uci -q get xlnetacc.general.down_acc)" = 1 ]; then
+				web_open
+			fi
+		fi
+		next_check=$(( $(date +%s) + 300 ))
+	fi
+	sleep 2
+done

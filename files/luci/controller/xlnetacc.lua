@@ -19,6 +19,8 @@ function index()
 	entry({"admin", "services", "xlnetacc", "captcha_image"}, call("action_captcha_image"))
 	entry({"admin", "services", "xlnetacc", "captcha"}, post("action_captcha"))
 	entry({"admin", "services", "xlnetacc", "test_api"}, post("action_test_api"))
+	entry({"admin", "services", "xlnetacc", "web_action"}, post("action_web"))
+	entry({"admin", "services", "xlnetacc", "oauth_callback"}, post("action_oauth_callback"))
 end
 
 local function is_running(name)
@@ -41,14 +43,83 @@ local function reply(code, message)
 end
 
 function action_status()
+	local protocol = require("luci.model.uci").cursor():get("xlnetacc", "general", "protocol") or "android"
+	if protocol == "web" then
+		local raw = nixio.fs.readfile("/var/run/xlnetacc-web/status.json") or "{}"
+		local ok, state = pcall(require("luci.jsonc").parse, raw)
+		if not ok or type(state) ~= "table" then state = {} end
+		local running = is_running("xlnetacc-web")
+		if not running then
+			state = {stage="stopped", message="请启用新版协议并保存应用，然后登录授权"}
+		end
+		luci.http.prepare_content("application/json")
+		luci.http.header("Cache-Control", "no-store")
+		luci.http.write_json({protocol="web", run_state=running, web=state})
+		return
+	end
 	luci.http.prepare_content("application/json")
 	luci.http.write_json({
+		protocol = "android",
 		run_state = is_running("xlnetacc.sh"),
 		down_state = nixio.fs.readfile("/var/state/xlnetacc_down_state") or "",
 		up_state = nixio.fs.readfile("/var/state/xlnetacc_up_state") or "",
 		captcha = captcha_state(),
 		api_test = nixio.fs.readfile(runtime .. "/test.status") or ""
 	})
+end
+
+function action_web()
+	if not luci.dispatcher.test_post_security() then return end
+	local action = luci.http.formvalue("action")
+	local allowed = {authorize=true, cancel=true, forget=true, check=true, open=true, close=true}
+	if not allowed[action or ""] then return reply(400, "无效操作") end
+	local protocol = require("luci.model.uci").cursor():get("xlnetacc", "general", "protocol") or "android"
+	if protocol ~= "web" or not is_running("xlnetacc-web") then
+		return reply(409, "请先启用新版协议并保存应用")
+	end
+	local state = nixio.fs.readfile("/var/run/xlnetacc-web/status.json") or ""
+	local ok, parsed = pcall(require("luci.jsonc").parse, state)
+	if ok and type(parsed) == "table" and parsed.stage == "authorizing" and action ~= "cancel" and action ~= "forget" then
+		return reply(409, "正在等待授权，请先完成或取消")
+	end
+	local path = "/var/run/xlnetacc-web/request." .. nixio.getpid()
+	local fd = nixio.open(path, nixio.open_flags("wronly", "creat", "excl"), "600")
+	if not fd then return reply(503, "无法排队操作") end
+	local data = action .. "\n"
+	local written = fd:write(data)
+	fd:close()
+	if written ~= #data or not nixio.fs.rename(path, "/var/run/xlnetacc-web/request") then
+		nixio.fs.remove(path)
+		return reply(503, "无法提交操作")
+	end
+	reply(200, "操作已提交，请等待状态更新")
+end
+
+-- The user transfers the official return URL through an authenticated CSRF-protected
+-- form. Validate the one-time OAuth state too; PKCE remains inside the daemon.
+function action_oauth_callback()
+	if not luci.dispatcher.test_post_security() then return end
+	luci.http.header("Cache-Control", "no-store")
+	luci.http.header("Referrer-Policy", "no-referrer")
+	local pending = nixio.fs.readfile("/var/run/xlnetacc-web/oauth.pending") or ""
+	local expected, deadline = pending:match("^([a-f0-9]+)\n(%d+)\n$")
+	local state = luci.http.formvalue("state") or ""
+	local code = luci.http.formvalue("code") or ""
+	if not expected or #expected ~= 64 or state ~= expected or tonumber(deadline) <= os.time() then
+		return reply(409, "授权会话已过期或不匹配，请回到插件页面重试")
+	end
+	if #code == 0 or #code > 4096 or code:find("%c") then return reply(400, "授权响应无效") end
+	local path = "/var/run/xlnetacc-web/oauth.callback." .. nixio.getpid()
+	local fd = nixio.open(path, nixio.open_flags("wronly", "creat", "excl"), "600")
+	if not fd then return reply(503, "无法保存授权响应") end
+	local data = state .. "\n" .. code .. "\n"
+	local written = fd:write(data)
+	fd:close()
+	if written ~= #data or not nixio.fs.rename(path, "/var/run/xlnetacc-web/oauth.callback") then
+		nixio.fs.remove(path); return reply(503, "保存授权响应失败")
+	end
+	nixio.fs.remove("/var/run/xlnetacc-web/oauth.pending")
+	reply(200, "授权响应已提交，正在验证")
 end
 
 function action_captcha_image()
@@ -86,7 +157,7 @@ function action_captcha()
 		return reply(409, "当前无法刷新验证码")
 	end
 	local path = runtime .. "/request." .. nixio.getpid()
-	local fd = nixio.open(path, nixio.open_flags("wronly", "creat", "excl"), 384)
+	local fd = nixio.open(path, nixio.open_flags("wronly", "creat", "excl"), "600")
 	if not fd then return reply(503, "无法写入请求，请稍后重试") end
 	local data = generation .. "\n" .. action .. "\n" .. code .. "\n"
 	local written = fd:write(data)
